@@ -122,20 +122,57 @@ def _ohne_sonder(g: pd.Series) -> pd.Series:
     return g
 
 
+def _modus(werte):
+    """Häufigster Wert, bei Gleichstand der kleinste (wie pandas .mode())."""
+    z = {}
+    for w in werte:
+        z[w] = z.get(w, 0) + 1
+    top = max(z.values())
+    return min(w for w, c in z.items() if c == top)
+
+
+def _verschiebe_luecken(listen: dict) -> dict:
+    """
+    Zahlungsverschiebung über ein komplett leeres Jahr: Hat ein Jahr doppelt so viele Zahlungen
+    wie üblich (2m) und davor (oder danach) fehlt innerhalb der Historie ein Jahr ganz, werden die
+    Zahlungen auf beide Jahre verteilt. Beispiel DNB: 2020 keine, 2021 zwei Zahlungen
+    (Corona-Aufschub) -> je eine Zahlung für 2020 und 2021.
+    """
+    jahre = sorted(listen)
+    n0 = {j: len(v) for j, v in listen.items()}
+    m = _modus(n0.values())
+    neu = dict(listen)
+    for b in jahre:
+        if n0[b] != 2 * m:
+            continue
+        vor, nach = b - 1, b + 1
+        if vor > jahre[0] and vor not in listen and vor not in neu:
+            neu[vor], neu[b] = listen[b][:m], listen[b][m:]
+        elif nach < jahre[-1] and nach not in listen and nach not in neu:
+            neu[nach], neu[b] = listen[b][m:], listen[b][:m]
+    return neu
+
+
 def jahressummen(dividenden: pd.Series, letztes_jahr: int) -> pd.Series:
     """
     Jahresdividende je Kalenderjahr (nur volle Jahre), bereinigt um
-      - Sonderdividenden und
+      - Sonderdividenden,
+      - Zahlungsverschiebungen über ein leeres Jahr (siehe _verschiebe_luecken) und
       - Zahlungsverschiebungen über den Jahreswechsel (ein Jahr 5, das nächste 3
         statt 4+4 Zahlungen): beide Jahre werden auf die übliche Zahl normiert.
     """
     d = dividenden[dividenden > 0]
-    summe, anzahl = {}, {}
+    listen = {}
     for jahr, g in d.groupby(d.index.year):
         if jahr > letztes_jahr:
             continue
         g = _ohne_sonder(g)
-        summe[jahr], anzahl[jahr] = float(g.sum()), len(g)
+        if len(g):
+            listen[int(jahr)] = [float(x) for x in g.values]
+    if len(listen) >= 3:
+        listen = _verschiebe_luecken(listen)
+    summe = {j: float(sum(v)) for j, v in listen.items()}
+    anzahl = {j: len(v) for j, v in listen.items()}
     s = pd.Series(summe, dtype=float).sort_index()
     if len(s) < 3:
         return s
