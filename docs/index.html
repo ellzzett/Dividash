@@ -54,6 +54,9 @@ th[aria-sort] button{color:var(--ink)}
 th[aria-sort=ascending] button::after{content:" ↑"} th[aria-sort=descending] button::after{content:" ↓"}
 td{font-variant-numeric:tabular-nums}
 td.name{white-space:normal;min-width:200px}
+td.name a{color:inherit;text-decoration:none}
+td.name a:hover b{color:var(--acc);text-decoration:underline}
+td.name a:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:2px}
 td.name b{font-weight:600} td.name small{display:block;color:var(--mute);font-size:12.5px}
 .pips{display:flex;gap:3px;justify-content:flex-end;margin-top:3px}
 .pips b{width:9px;height:4px;border-radius:2px;background:var(--line)}
@@ -213,7 +216,7 @@ function render(rescore){
       const txt = !ok(v) ? '–' : c.pct ? nf(v*100)+' %' : nf(v,0)+(c.unit||'');
       return `<td>${txt}${pips(r._p[c.k])}</td>`;
     }).join('');
-    return `<tr><td class="name"><b>${esc(r.name||r.ticker)}</b><small>${esc(r.ticker)}${r.sektor?' · '+esc(r.sektor):''}</small></td>
+    return `<tr><td class="name"><a href="https://finance.yahoo.com/quote/${encodeURIComponent(r.ticker)}" target="_blank" rel="noopener noreferrer" title="Datenquelle: Yahoo Finance"><b>${esc(r.name||r.ticker)}</b></a><small>${esc(r.ticker)}${r.sektor?' · '+esc(r.sektor):''}</small></td>
       <td><div class="score">${r._total}<small> / 18</small></div><div class="bar"><i style="width:${r._total/18*100}%"></i></div></td>
       ${cells}<td>${r.warnung?`<span class="chip" title="${esc(r.warnung)}">prüfen</span>`:''}</td></tr>`;
   }).join('');
