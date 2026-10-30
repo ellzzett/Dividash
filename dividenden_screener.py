@@ -481,7 +481,6 @@ def screene(tickers, min_punkte=0, workers=4, cache_tage=7, cache_datei=None):
     if df.empty:
         return df
     df["name"] = df["name"].fillna(df["ticker"])
-    df = df[df.punkte_gesamt >= min_punkte]
     return df.sort_values(["punkte_gesamt", "rendite_aktuell"],
                           ascending=False).reset_index(drop=True)
 
@@ -523,20 +522,26 @@ def main():
     if not ticker:
         return
 
-    ergebnis = screene(ticker, args.min_punkte, args.workers, args.cache_tage, args.cache)
+    alle = screene(ticker, args.min_punkte, args.workers, args.cache_tage, args.cache)
+    if alle.empty:
+        print("Keine Dividendenaktie gefunden.")
+        return
+
+    # Rohkennzahlen ALLER Dividendenaktien für das Dashboard (Punkte rechnet das Dashboard selbst)
+    os.makedirs("docs", exist_ok=True)
+    roh = alle.drop(columns=[c for c in alle.columns
+                             if c.startswith("p_") or c == "punkte_gesamt"])
+    roh = roh.astype(object).where(roh.notna(), None)
+    with open("docs/data.json", "w", encoding="utf-8") as f:
+        json.dump({"updated": date.today().isoformat(),
+                   "rows": roh.to_dict("records")}, f, ensure_ascii=False, default=float)
+
+    ergebnis = alle[alle.punkte_gesamt >= args.min_punkte].reset_index(drop=True)
     if ergebnis.empty:
         print("Keine Aktie erreicht die Mindestpunktzahl.")
         return
     ergebnis.to_csv("screener_ergebnis.csv", index=False)
 
-    # Rohkennzahlen für das Dashboard (die Punkte rechnet das Dashboard selbst)
-    os.makedirs("docs", exist_ok=True)
-    roh = ergebnis.drop(columns=[c for c in ergebnis.columns
-                                 if c.startswith("p_") or c == "punkte_gesamt"])
-    roh = roh.astype(object).where(roh.notna(), None)
-    with open("docs/data.json", "w", encoding="utf-8") as f:
-        json.dump({"updated": date.today().isoformat(),
-                   "rows": roh.to_dict("records")}, f, ensure_ascii=False, default=float)
     spalten = [c for c in ["ticker", "name", "sektor", "punkte_gesamt", "rendite_aktuell",
                            "rendite_10j", "payout", "jahre_ohne_kuerzung", "anhebungen",
                            "wachstum_5j", "warnung"] if c in ergebnis.columns]
