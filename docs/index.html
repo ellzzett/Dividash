@@ -28,6 +28,9 @@ aside h2{font-size:16px;margin:0 0 4px}
 aside p.hint{margin:0 0 12px;color:var(--mute);font-size:13px}
 fieldset{border:0;border-top:1px solid var(--line);margin:0;padding:10px 0 12px}
 legend{padding:0;font-weight:600;font-size:14px;float:left;width:100%}
+legend label{display:flex;gap:8px;align-items:center;cursor:pointer}
+legend input{width:auto;margin:0;accent-color:var(--acc)}
+fieldset.off .row,fieldset.off .sub{opacity:.4}
 .sub{clear:both;color:var(--mute);font-size:12.5px;margin:2px 0 6px}
 .row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .row.two{grid-template-columns:42px 1fr 1fr;align-items:center}
@@ -44,7 +47,7 @@ button.reset:hover{background:var(--bg)}
 .tools .chk{display:flex;gap:6px;align-items:center;padding-bottom:7px;font-size:14px}
 #count{margin-left:auto;color:var(--mute);font-size:14px;padding-bottom:7px}
 .scroll{overflow-x:auto}
-table{border-collapse:collapse;width:100%;min-width:860px}
+table{border-collapse:collapse;width:100%;min-width:1000px}
 th,td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
 th:first-child,td:first-child{text-align:left}
 th{font-weight:600;font-size:13px;color:var(--mute);background:var(--panel);position:sticky;top:0}
@@ -88,7 +91,7 @@ td.name b{font-weight:600} td.name small{display:block;color:var(--mute);font-si
     <div class="tools">
       <div><label class="f" for="q">Suche</label><input id="q" type="search" placeholder="Ticker oder Name"></div>
       <div><label class="f" for="sec">Sektor</label><select id="sec"><option value="">Alle</option></select></div>
-      <div><label class="f" for="min">Mindestpunkte (von 18)</label><input id="min" type="number" min="0" max="18" step="1"></div>
+      <div><label class="f" for="min">Mindestpunkte (max. <span id="gmax">18</span>)</label><input id="min" type="number" min="0" max="18" step="1"></div>
       <label class="chk"><input id="nowarn" type="checkbox"> Warnungen ausblenden</label>
       <span id="count"></span>
     </div>
@@ -103,15 +106,22 @@ td.name b{font-weight:600} td.name small{display:block;color:var(--mute);font-si
 // Schwellen je Stufe (3 / 2 / 1 Punkte). Prozentwerte in %, Zähler in Jahren bzw. Anzahl.
 const DEF = {
   r10:[3,2,1], ra:[5,3.5,2], w5:[10,5,0], kk:[10,8,5], ah:[20,10,3],
-  pay:[[25,75],[20,80],[15,85]], min:12
+  pay:[[25,75],[20,80],[15,85]],
+  roe:[15,10,5], sch:[50,100,150], fcf:[60,80,100],
+  min:12,
+  kt:2, am:0.5, sf:2,     // Toleranzen: Kürzung %, Anhebung %, Sonderdividende ×Median
+  on:{r10:true,pay:true,kk:true,ah:true,ra:true,w5:true,roe:true,sch:true,fcf:true}
 };
 const GROUPS = [
-  {id:'r10', t:'Ø Rendite, 10 Jahre', sub:'Rendite größer als … %', u:'%'},
+  {id:'r10', t:'Ø Rendite, 10 Jahre', sub:'Rendite größer als … %'},
   {id:'pay', t:'Payout-Ratio', sub:'Quote liegt zwischen … und … %'},
   {id:'kk',  t:'Jahre ohne Kürzung', sub:'mindestens … Jahre'},
   {id:'ah',  t:'Anhebungen in Folge', sub:'mindestens … Anhebungen'},
-  {id:'ra',  t:'Aktuelle Rendite', sub:'Rendite größer als … %', u:'%'},
-  {id:'w5',  t:'Dividendenwachstum, 5 Jahre p. a.', sub:'Wachstum größer als … %', u:'%'},
+  {id:'ra',  t:'Aktuelle Rendite', sub:'Rendite größer als … %'},
+  {id:'w5',  t:'Dividendenwachstum, 5 Jahre p. a.', sub:'Wachstum größer als … %'},
+  {id:'roe', t:'Eigenkapitalrendite (ROE)', sub:'ROE größer als … %'},
+  {id:'sch', t:'Verschuldung (Debt/Equity)', sub:'Schulden/Eigenkapital kleiner als … % · Finanzsektor wird nicht bewertet'},
+  {id:'fcf', t:'Dividendendeckung durch Free Cashflow', sub:'Dividenden/Free Cashflow höchstens … %'},
 ];
 const COLS = [ // Reihenfolge = Tabellenspalten
   {k:'ra',  t:'Rendite aktuell', f:r=>r.rendite_aktuell, pct:1},
@@ -120,12 +130,71 @@ const COLS = [ // Reihenfolge = Tabellenspalten
   {k:'kk',  t:'Ohne Kürzung', f:r=>r.jahre_ohne_kuerzung, unit:' J.'},
   {k:'ah',  t:'Anhebungen', f:r=>r.anhebungen},
   {k:'w5',  t:'Wachstum 5 J.', f:r=>r.wachstum_5j, pct:1},
+  {k:'roe', t:'ROE', f:r=>r.roe, pct:1},
+  {k:'sch', t:'Schulden/EK', f:r=>r.schulden, unit:' %'},
+  {k:'fcf', t:'Deckung FCF', f:r=>r.fcf_payout, pct:1},
 ];
-const ORDER = ['r10','pay','kk','ah','ra','w5'];  // wie im Python-Skript
+const ORDER = COLS.map(c=>c.k);
+const FINANZ = 'Financial Services';
 
 let cfg = structuredClone(DEF), rows = [], sort = {k:'total', dir:-1}, shown = 100, sektor = '', suche = '', nowarn = false;
-try { const s = JSON.parse(localStorage.getItem('div-cfg')||'null'); if (s) cfg = {...cfg, ...s}; } catch(e){}
+try { const s = JSON.parse(localStorage.getItem('div-cfg')||'null'); if (s) cfg = {...cfg, ...s, on:{...DEF.on, ...(s.on||{})}}; } catch(e){}
 const save = () => { try { localStorage.setItem('div-cfg', JSON.stringify(cfg)); } catch(e){} };
+
+// ------------------------------------------------------ Kennzahlen (Toleranzen)
+// Rechnet die Kennzahlen aus den Rohzahlungen neu, damit Toleranzen live änderbar sind.
+// Entspricht kennzahlen()/jahressummen() im Python-Skript.
+let letzt = new Date().getFullYear()-1;
+const num = (v,d)=> (v==null||isNaN(v)) ? d : v;
+const med = a=>{ const s=[...a].sort((x,y)=>x-y), n=s.length; return n%2 ? s[(n-1)/2] : (s[n/2-1]+s[n/2])/2; };
+const ohneSonder = g=> g.length>=3 ? g.filter(x=>x<=num(cfg.sf,Infinity)*med(g)) : g;
+const summe = a=>a.reduce((x,y)=>x+y,0);
+function jahressummen(z){
+  const js={}, n={};
+  for(const y of Object.keys(z).map(Number).sort((a,b)=>a-b)){
+    if(y>letzt) continue;
+    const g=ohneSonder(z[y].filter(x=>x>0));
+    if(!g.length) continue;
+    js[y]=summe(g); n[y]=g.length;
+  }
+  const jahre=Object.keys(js).map(Number).sort((a,b)=>a-b);
+  if(jahre.length>=3){
+    const cnt={}; jahre.forEach(y=>cnt[n[y]]=(cnt[n[y]]||0)+1);
+    const m=Number(Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]||a-b)[0]);
+    for(let i=0;i<jahre.length-1;i++){      // Zahlungsverschiebung über den Jahreswechsel
+      const a=jahre[i], b=jahre[i+1];
+      if(b===a+1 && n[a]!==m && n[a]+n[b]===2*m){
+        js[a]=js[a]*m/n[a]; js[b]=js[b]*m/n[b]; n[a]=n[b]=m;
+      }
+    }
+  }
+  return {js,jahre};
+}
+function berechne(r){
+  const z=r.zahlungen; if(!z) return;       // ältere data.json: gespeicherte Werte behalten
+  const {js,jahre}=jahressummen(z);
+  const kt=num(cfg.kt,0)/100, am=num(cfg.am,0)/100;
+  let r10=null, kk=0, ah=0, w5=null;
+  if(jahre.length && jahre[jahre.length-1]===letzt){
+    const rr=[];
+    for(let y=letzt-9;y<=letzt;y++){
+      const e=r.jahresend&&r.jahresend[y];
+      if(js[y]==null||!e){ rr.length=0; break; }
+      rr.push(js[y]/e);
+    }
+    if(rr.length===10) r10=summe(rr)/10;
+    for(let i=jahre.length-1;i>0;i--){
+      if(jahre[i]-jahre[i-1]!==1 || js[jahre[i]] < js[jahre[i-1]]*(1-kt)) break; kk++;
+    }
+    for(let i=jahre.length-1;i>0;i--){
+      if(jahre[i]-jahre[i-1]!==1 || js[jahre[i]] <= js[jahre[i-1]]*(1+am)) break; ah++;
+    }
+    if(js[letzt-5]>0) w5=Math.pow(js[letzt]/js[letzt-5],1/5)-1;
+  }
+  r.rendite_10j=r10; r.jahre_ohne_kuerzung=kk; r.anhebungen=ah; r.wachstum_5j=w5;
+  r.rendite_aktuell = r.kurs>0 ? summe(ohneSonder((r.zahlungen_12m||[]).filter(x=>x>0)))/r.kurs : null;
+}
+function neuBerechnen(){ rows.forEach(berechne); render(true); }
 
 // ------------------------------------------------------------- Bewertung
 const ok = v => v!=null && !isNaN(v);
@@ -139,13 +208,32 @@ function payoutPunkte(p){
   for(let i=0;i<3;i++){ const [lo,hi]=cfg.pay[i]; if(ok(lo)&&ok(hi)&&p>=lo/100&&p<=hi/100) return 3-i; }
   return 0;
 }
+function unter(v,t){            // kleiner ist besser, negative Werte (neg. Eigenkapital) = 0
+  if(!ok(v)||v<0) return 0;
+  for(let i=0;i<3;i++){ if(ok(t[i]) && v<t[i]) return 3-i; }
+  return 0;
+}
+function deckung(v){            // Dividenden/FCF: höchstens Schwelle, nur positiv
+  if(!ok(v)||v<=0) return 0;
+  for(let i=0;i<3;i++){ const s=cfg.fcf[i]/100; if(ok(s) && v<=s) return 3-i; }
+  return 0;
+}
 function bewerte(r){
   const p = {
     r10:stufen(r.rendite_10j,cfg.r10,false,100), pay:payoutPunkte(r.payout),
     kk:stufen(r.jahre_ohne_kuerzung,cfg.kk,true,1), ah:stufen(r.anhebungen,cfg.ah,true,1),
-    ra:stufen(r.rendite_aktuell,cfg.ra,false,100), w5:stufen(r.wachstum_5j,cfg.w5,false,100)
+    ra:stufen(r.rendite_aktuell,cfg.ra,false,100), w5:stufen(r.wachstum_5j,cfg.w5,false,100),
+    roe:stufen(r.roe,cfg.roe,false,100),
+    sch:r.sektor===FINANZ ? null : unter(r.schulden,cfg.sch),   // null = nicht bewertet
+    fcf:deckung(r.fcf_payout)
   };
-  r._p = p; r._total = ORDER.reduce((a,k)=>a+p[k],0);
+  let t=0, m=0;
+  for(const k of ORDER){
+    if(!cfg.on[k]){ p[k]=0; continue; }
+    if(p[k]===null) continue;
+    t+=p[k]; m+=3;
+  }
+  r._p=p; r._total=t; r._max=m;
 }
 
 // ---------------------------------------------------------- Einstellungen
@@ -161,25 +249,47 @@ function buildSettings(){
       inner = `<div class="row">`+[3,2,1].map((pt,i)=>`<label class="f">${pt} Punkte
         <input type="number" data-g="${g.id}" data-i="${i}" step="any"></label>`).join('')+`</div>`;
     }
-    return `<fieldset><legend>${g.t}</legend><div class="sub">${g.sub}</div>${inner}</fieldset>`;
-  }).join('');
+    return `<fieldset data-fs="${g.id}"><legend><label><input type="checkbox" data-on="${g.id}"> ${g.t}</label></legend><div class="sub">${g.sub}</div>${inner}</fieldset>`;
+  }).join('') + `<fieldset><legend>Berechnung (Toleranzen)</legend>
+    <div class="sub">Diese Werte ändern die Kennzahlen selbst, nicht nur die Punkte.</div>
+    <label class="f">Kürzungstoleranz in % <input type="number" data-s="kt" step="any" min="0"></label>
+    <div class="sub">Ein Rückgang unterhalb dieses Werts gilt nicht als Kürzung (Währung, Rundung).</div>
+    <label class="f">Mindest-Anhebung in % <input type="number" data-s="am" step="any" min="0"></label>
+    <div class="sub">Erst ein Anstieg ab diesem Wert zählt als Anhebung.</div>
+    <label class="f">Sonderdividende ab Faktor × Median <input type="number" data-s="sf" step="any" min="1"></label>
+    <div class="sub">Zahlungen darüber werden ignoriert (nur bei mindestens 3 Zahlungen im Jahr).</div>
+  </fieldset>`;
   fillInputs();
 }
 function fillInputs(){
-  document.querySelectorAll('#settings input').forEach(inp=>{
+  document.querySelectorAll('#settings input[data-on]').forEach(cb=>{
+    cb.checked = !!cfg.on[cb.dataset.on];
+    cb.closest('fieldset').classList.toggle('off', !cb.checked);
+  });
+  document.querySelectorAll('#settings input[data-g]').forEach(inp=>{
     const {g,i,j} = inp.dataset;
     inp.value = g==='pay' ? cfg.pay[i][j] : cfg[g][i];
   });
+  document.querySelectorAll('#settings input[data-s]').forEach(inp=>{ inp.value = cfg[inp.dataset.s]; });
   document.getElementById('min').value = cfg.min;
 }
 document.getElementById('settings').addEventListener('input', e=>{
+  if(e.target.dataset.on){
+    cfg.on[e.target.dataset.on] = e.target.checked;
+    e.target.closest('fieldset').classList.toggle('off', !e.target.checked);
+    save(); render(true); return;
+  }
+  if(e.target.dataset.s){
+    cfg[e.target.dataset.s] = e.target.value==='' ? NaN : parseFloat(e.target.value);
+    save(); neuBerechnen(); return;
+  }
   const {g,i,j} = e.target.dataset; if(!g) return;
   const v = e.target.value===''? NaN : parseFloat(e.target.value);
   if(g==='pay') cfg.pay[i][j] = v; else cfg[g][i] = v;
   save(); render(true);
 });
 document.getElementById('min').addEventListener('input', e=>{ cfg.min = parseInt(e.target.value)||0; save(); render(); });
-document.getElementById('reset').addEventListener('click', ()=>{ cfg = structuredClone(DEF); save(); fillInputs(); render(true); });
+document.getElementById('reset').addEventListener('click', ()=>{ cfg = structuredClone(DEF); save(); fillInputs(); neuBerechnen(); });
 document.getElementById('q').addEventListener('input', e=>{ suche = e.target.value.toLowerCase(); render(); });
 document.getElementById('sec').addEventListener('change', e=>{ sektor = e.target.value; render(); });
 document.getElementById('nowarn').addEventListener('change', e=>{ nowarn = e.target.checked; render(); });
@@ -197,6 +307,11 @@ function sortVal(r,k){
 }
 function render(rescore){
   if(rescore) rows.forEach(bewerte);
+  const cols = COLS.filter(c=>cfg.on[c.k]);
+  if(sort.k!=='total' && sort.k!=='name' && !cols.some(c=>c.k===sort.k)) sort={k:'total',dir:-1};
+  const gm = cols.length*3;
+  document.getElementById('gmax').textContent = gm;
+  document.getElementById('min').max = gm;
   const list = rows.filter(r=> r._total>=cfg.min
     && (!sektor || r.sektor===sektor)
     && (!suche || (r.ticker+' '+(r.name||'')).toLowerCase().includes(suche))
@@ -208,16 +323,17 @@ function render(rescore){
     return d ? d*sort.dir : (b.rendite_aktuell||0)-(a.rendite_aktuell||0);
   });
   document.getElementById('count').textContent = `${list.length.toLocaleString('de-DE')} von ${rows.length.toLocaleString('de-DE')} Aktien`;
-  const head = [['name','Aktie'],['total','Punkte'],...COLS.map(c=>[c.k,c.t])];
+  const head = [['name','Aktie'],['total','Punkte'],...cols.map(c=>[c.k,c.t])];
   const th = head.map(([k,t])=>`<th scope="col" ${sort.k===k?`aria-sort="${sort.dir>0?'ascending':'descending'}"`:''}><button type="button" data-k="${k}">${t}</button></th>`).join('')+'<th scope="col">Hinweis</th>';
   const body = list.slice(0,shown).map(r=>{
-    const cells = COLS.map(c=>{
+    const cells = cols.map(c=>{
+      if(r._p[c.k]===null) return `<td title="Für den Finanzsektor nicht bewertet">n. a.</td>`;
       const v = c.f(r);
       const txt = !ok(v) ? '–' : c.pct ? nf(v*100)+' %' : nf(v,0)+(c.unit||'');
       return `<td>${txt}${pips(r._p[c.k])}</td>`;
     }).join('');
     return `<tr><td class="name"><a href="https://finance.yahoo.com/quote/${encodeURIComponent(r.ticker)}" target="_blank" rel="noopener noreferrer" title="Datenquelle: Yahoo Finance"><b>${esc(r.name||r.ticker)}</b></a><small>${esc(r.ticker)}${r.sektor?' · '+esc(r.sektor):''}</small></td>
-      <td><div class="score">${r._total}<small> / 18</small></div><div class="bar"><i style="width:${r._total/18*100}%"></i></div></td>
+      <td><div class="score">${r._total}<small> / ${r._max}</small></div><div class="bar"><i style="width:${r._max? r._total/r._max*100 : 0}%"></i></div></td>
       ${cells}<td>${r.warnung?`<span class="chip" title="${esc(r.warnung)}">prüfen</span>`:''}</td></tr>`;
   }).join('');
   document.getElementById('tbl').innerHTML = `<thead><tr>${th}</tr></thead><tbody>${body}</tbody>`;
@@ -234,7 +350,9 @@ document.getElementById('tbl').addEventListener('click', e=>{
 
 // ---------------------------------------------------------------- Daten
 function setData(d){
-  rows = d.rows||[]; rows.forEach(bewerte);
+  rows = d.rows||[];
+  letzt = (d.updated ? +d.updated.slice(0,4) : new Date().getFullYear()) - 1;
+  rows.forEach(berechne); rows.forEach(bewerte);
   const secs = [...new Set(rows.map(r=>r.sektor).filter(Boolean))].sort();
   const sel = document.getElementById('sec');
   sel.innerHTML = '<option value="">Alle</option>'+secs.map(s=>`<option>${esc(s)}</option>`).join('');
