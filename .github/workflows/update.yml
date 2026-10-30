@@ -25,6 +25,7 @@ jobs:
       - name: Screener ausführen
         env:
           PYTHONWARNINGS: ignore
+          PYTHONUNBUFFERED: "1"
         run: timeout 340m python dividenden_screener.py --min-punkte 9 --cache-tage 6 --cache screener_cache.json || true
 
       - name: Ergebnis committen
