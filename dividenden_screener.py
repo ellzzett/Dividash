@@ -63,6 +63,7 @@ WARN_RENDITE = 0.15        # Renditen darüber werden als "prüfen" markiert
 STANDARD_UNIVERSEN = ["sp500", "dax", "mdax"]
 STANDARD_ISHARES = ["ieur", "iemg", "ipac", "acwi"]   # Europa, Schwellenländer, Pazifik, Welt (u. a. Kanada)
 
+VERSION = "1.4.0"      # Skript-Version, wird in data.json geschrieben und im Dashboard angezeigt
 CACHE_VERSION = 5
 CACHE_DATEI = "screener_cache.json"
 
@@ -651,7 +652,7 @@ def main():
                              if c.startswith("p_") or c == "punkte_gesamt"])
     roh = roh.astype(object).where(roh.notna(), None)
     with open("docs/data.json", "w", encoding="utf-8") as f:
-        json.dump({"updated": date.today().isoformat(),
+        json.dump({"version": VERSION, "updated": date.today().isoformat(),
                    "rows": roh.to_dict("records")}, f, ensure_ascii=False, default=float, separators=(",", ":"))
 
     ergebnis = alle[alle.punkte_gesamt >= args.min_punkte].reset_index(drop=True)
