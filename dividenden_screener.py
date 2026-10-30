@@ -63,8 +63,8 @@ WARN_RENDITE = 0.15        # Renditen darüber werden als "prüfen" markiert
 STANDARD_UNIVERSEN = ["sp500", "dax", "mdax"]
 STANDARD_ISHARES = ["ieur", "iemg", "ipac", "acwi"]   # Europa, Schwellenländer, Pazifik, Welt (u. a. Kanada)
 
-VERSION = "1.4.0"      # Skript-Version, wird in data.json geschrieben und im Dashboard angezeigt
-CACHE_VERSION = 5
+VERSION = "1.5.0"      # Skript-Version, wird in data.json geschrieben und im Dashboard angezeigt
+CACHE_VERSION = 6
 CACHE_DATEI = "screener_cache.json"
 
 
@@ -240,6 +240,7 @@ def kennzahlen(dividenden: pd.Series, kurse: pd.Series, payout, heute=None):
         "roe": None,
         "schulden": None,
         "fcf_payout": None,
+        "kgv": None,
     }
 
 
@@ -264,6 +265,24 @@ def rohdaten(dividenden: pd.Series, kurse: pd.Series, heute=None) -> dict:
                  if letztes - 10 <= j <= letztes}
     return {"zahlungen": zahlungen, "zahlungen_12m": z12, "jahresend": jahresend,
             "kurs": float(f"{kurse.iloc[-1]:.5g}")}
+
+
+def kursdaten(kurse: pd.Series, heute=None) -> dict:
+    """
+    Performance seit Jahresbeginn (letzter Schlusskurs des Vorjahres -> letzter Kurs) und
+    Abstand zum Allzeithoch (Schlusskurse, nur Splits bereinigt). Ist der letzte Kurs älter
+    als 30 Tage (z. B. eingestellter Handel), bleiben beide Werte leer.
+    """
+    heute = heute or date.today()
+    leer = {"ytd": None, "ath_abstand": None}
+    if kurse.empty or kurse.iloc[-1] <= 0:
+        return leer
+    if (heute - kurse.index[-1].date()).days > 30:
+        return leer
+    letzter = float(kurse.iloc[-1])
+    vorjahr = kurse[kurse.index.year == heute.year - 1]
+    ytd = float(letzter / vorjahr.iloc[-1] - 1) if len(vorjahr) and vorjahr.iloc[-1] > 0 else None
+    return {"ytd": ytd, "ath_abstand": float(letzter / kurse.max() - 1)}
 
 
 def warnhinweis(k: dict) -> str:
@@ -519,6 +538,8 @@ def analysiere(yf, t, min_punkte):
             k["roe"] = info.get("returnOnEquity")
             k["schulden"] = info.get("debtToEquity")      # Yahoo liefert Prozent (45 = 45 %)
             k["sektor"] = info.get("sector")
+            kgv = info.get("trailingPE")                  # KGV auf Basis der letzten 12 Monate
+            k["kgv"] = float(kgv) if isinstance(kgv, (int, float)) and kgv > 0 else None
             # Dividendendeckung: Dividenden (= Payout x Gewinn) / Free Cashflow. Beide Größen
             # stehen in der Berichtswährung, so entstehen keine Währungsfehler.
             fcf, gewinn, po = (info.get("freeCashflow"), info.get("netIncomeToCommon"),
@@ -532,7 +553,7 @@ def analysiere(yf, t, min_punkte):
             geprueft = True
     return {"ticker": t, "name": name, "sektor": sektor, "waehrung": waehrung,
             **k, **punkte, "warnung": warnhinweis(k), "payout_geprueft": geprueft,
-            **rohdaten(div, kurse)}
+            **kursdaten(kurse), **rohdaten(div, kurse)}
 
 
 def _lade_cache(pfad):
@@ -665,7 +686,8 @@ def main():
 
     spalten = [c for c in ["ticker", "name", "sektor", "punkte_gesamt", "rendite_aktuell",
                            "rendite_10j", "payout", "jahre_ohne_kuerzung", "anhebungen",
-                           "wachstum_5j", "roe", "schulden", "fcf_payout", "warnung"] if c in ergebnis.columns]
+                           "wachstum_5j", "roe", "schulden", "fcf_payout", "kgv", "ytd",
+                           "ath_abstand", "warnung"] if c in ergebnis.columns]
     pd.set_option("display.width", 250)
     pd.set_option("display.max_columns", None)
     print(f"\nTop {args.top} von {len(ergebnis)} Treffern (max. 27 Punkte), "
