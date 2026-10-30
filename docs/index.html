@@ -149,18 +149,35 @@ const num = (v,d)=> (v==null||isNaN(v)) ? d : v;
 const med = a=>{ const s=[...a].sort((x,y)=>x-y), n=s.length; return n%2 ? s[(n-1)/2] : (s[n/2-1]+s[n/2])/2; };
 const ohneSonder = g=> g.length>=3 ? g.filter(x=>x<=num(cfg.sf,Infinity)*med(g)) : g;
 const summe = a=>a.reduce((x,y)=>x+y,0);
+function modus(a){
+  const c={}; a.forEach(x=>c[x]=(c[x]||0)+1);
+  const top=Math.max(...Object.values(c));
+  return Math.min(...Object.keys(c).filter(k=>c[k]===top).map(Number));
+}
 function jahressummen(z){
-  const js={}, n={};
+  let L={};
   for(const y of Object.keys(z).map(Number).sort((a,b)=>a-b)){
     if(y>letzt) continue;
     const g=ohneSonder(z[y].filter(x=>x>0));
-    if(!g.length) continue;
-    js[y]=summe(g); n[y]=g.length;
+    if(g.length) L[y]=g;
   }
-  const jahre=Object.keys(js).map(Number).sort((a,b)=>a-b);
+  let jahre=Object.keys(L).map(Number).sort((a,b)=>a-b);
+  if(jahre.length>=3){      // Zahlungsverschiebung über ein komplett leeres Jahr (z. B. DNB 2020/21)
+    const N={}; jahre.forEach(y=>N[y]=L[y].length);
+    const m=modus(jahre.map(y=>N[y]));
+    const neu={...L};
+    for(const b of jahre){
+      if(N[b]!==2*m) continue;
+      const vor=b-1, nach=b+1;
+      if(vor>jahre[0] && !(vor in L) && !(vor in neu)){ neu[vor]=L[b].slice(0,m); neu[b]=L[b].slice(m); }
+      else if(nach<jahre[jahre.length-1] && !(nach in L) && !(nach in neu)){ neu[nach]=L[b].slice(m); neu[b]=L[b].slice(0,m); }
+    }
+    L=neu; jahre=Object.keys(L).map(Number).sort((a,b)=>a-b);
+  }
+  const js={}, n={};
+  jahre.forEach(y=>{ js[y]=summe(L[y]); n[y]=L[y].length; });
   if(jahre.length>=3){
-    const cnt={}; jahre.forEach(y=>cnt[n[y]]=(cnt[n[y]]||0)+1);
-    const m=Number(Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]||a-b)[0]);
+    const m=modus(jahre.map(y=>n[y]));
     for(let i=0;i<jahre.length-1;i++){      // Zahlungsverschiebung über den Jahreswechsel
       const a=jahre[i], b=jahre[i+1];
       if(b===a+1 && n[a]!==m && n[a]+n[b]===2*m){
