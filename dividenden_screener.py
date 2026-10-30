@@ -1,5 +1,5 @@
 """
-Dividenden-Screener mit Punkteschema (max. 18 Punkte)
+Dividenden-Screener mit Punkteschema (max. 27 Punkte)
 
 Kategorien (je 0-3 Punkte):
   1. Durchschnittliche Dividendenrendite 10 Jahre
@@ -8,6 +8,9 @@ Kategorien (je 0-3 Punkte):
   4. Anzahl aufeinanderfolgender Dividendenanhebungen
   5. Aktuelle Dividendenrendite
   6. Dividendenwachstum 5 Jahre (CAGR)
+  7. Eigenkapitalrendite (ROE)
+  8. Verschuldung (Debt/Equity, Finanzsektor ausgenommen)
+  9. Dividendendeckung durch den freien Cashflow
 
 Installation:  pip install yfinance pandas lxml requests
 
@@ -46,6 +49,11 @@ KEINE_KUERZUNG = [(10, 3), (8, 2), (5, 1)]                 # Jahre, >=
 ANHEBUNGEN = [(20, 3), (10, 2), (3, 1)]                    # Anzahl in Folge, >=
 PAYOUT_BAENDER = [((0.25, 0.75), 3), ((0.20, 0.80), 2), ((0.15, 0.85), 1)]  # inklusive
 
+ROE_STUFEN = [(0.15, 3), (0.10, 2), (0.05, 1)]             # strikt >
+SCHULDEN_STUFEN = [(50, 3), (100, 2), (150, 1)]            # Debt/Equity in %, strikt <, nicht negativ
+FCF_PAYOUT_STUFEN = [(0.60, 3), (0.80, 2), (1.00, 1)]      # Dividenden / Free Cashflow, <=, nur > 0
+SEKTOR_OHNE_SCHULDEN = "Financial Services"                # Banken/Versicherer: Verschuldung nicht bewertet
+
 KUERZUNG_TOLERANZ = 0.02   # Rückgang unter 2 % gilt nicht als Kürzung (Währung, Rundung)
 ANHEBUNG_MIN = 0.005       # Anstieg ab 0,5 % gilt als Anhebung
 SONDER_FAKTOR = 2.0        # Zahlung > 2x Median (bei >= 3 Zahlungen im Jahr) = Sonderdividende
@@ -55,7 +63,7 @@ WARN_RENDITE = 0.15        # Renditen darüber werden als "prüfen" markiert
 STANDARD_UNIVERSEN = ["sp500", "dax", "mdax"]
 STANDARD_ISHARES = ["ieur", "iemg", "ipac", "acwi"]   # Europa, Schwellenländer, Pazifik, Welt (u. a. Kanada)
 
-CACHE_VERSION = 3
+CACHE_VERSION = 5
 CACHE_DATEI = "screener_cache.json"
 
 
@@ -78,6 +86,16 @@ def punkte_payout(payout):
     return 0
 
 
+def punkte_unter(wert, stufen, inklusiv=False):
+    """Kleiner ist besser. Negative Werte (z. B. negatives Eigenkapital) geben 0 Punkte."""
+    if wert is None or pd.isna(wert) or wert < 0:
+        return 0
+    for schwelle, p in stufen:
+        if (wert <= schwelle) if inklusiv else (wert < schwelle):
+            return p
+    return 0
+
+
 def bewerte(k: dict) -> dict:
     p = {
         "p_rendite_10j": punkte_ueber(k["rendite_10j"], RENDITE_10J),
@@ -86,6 +104,11 @@ def bewerte(k: dict) -> dict:
         "p_anhebungen": punkte_ueber(k["anhebungen"], ANHEBUNGEN, inklusiv=True),
         "p_rendite_aktuell": punkte_ueber(k["rendite_aktuell"], RENDITE_AKT),
         "p_wachstum_5j": punkte_ueber(k["wachstum_5j"], WACHSTUM_5J),
+        "p_roe": punkte_ueber(k.get("roe"), ROE_STUFEN),
+        "p_schulden": 0 if k.get("sektor") == SEKTOR_OHNE_SCHULDEN
+                      else punkte_unter(k.get("schulden"), SCHULDEN_STUFEN),
+        "p_fcf": (punkte_unter(k.get("fcf_payout"), FCF_PAYOUT_STUFEN, inklusiv=True)
+                  if (k.get("fcf_payout") or 0) > 0 else 0),
     }
     p["punkte_gesamt"] = sum(p.values())
     return p
@@ -176,7 +199,33 @@ def kennzahlen(dividenden: pd.Series, kurse: pd.Series, payout, heute=None):
         "anhebungen": anhebungen,
         "rendite_aktuell": rendite_akt,
         "wachstum_5j": wachstum_5j,
+        "roe": None,
+        "schulden": None,
+        "fcf_payout": None,
     }
+
+
+def rohdaten(dividenden: pd.Series, kurse: pd.Series, heute=None) -> dict:
+    """
+    Rohdaten für das Dashboard: Mit ihnen berechnet das Dashboard die Kennzahlen im Browser
+    neu, sobald Toleranzen (Kürzung, Anhebung, Sonderdividende) verändert werden.
+    """
+    heute = heute or date.today()
+    letztes = heute.year - 1
+    d = dividenden[dividenden > 0]
+    zahlungen = {}
+    for jahr, g in d.groupby(d.index.year):
+        zahlungen[str(int(jahr))] = [float(f"{x:.5g}") for x in g.values]
+    idx = d.index
+    if getattr(idx, "tz", None) is not None:
+        idx = idx.tz_localize(None)
+    ab = pd.Timestamp(heute) - pd.DateOffset(years=1)
+    z12 = [float(f"{x:.5g}") for x in d.values[idx > ab]]
+    jahresend = kurse.groupby(kurse.index.year).last()
+    jahresend = {str(int(j)): float(f"{v:.5g}") for j, v in jahresend.items()
+                 if letztes - 10 <= j <= letztes}
+    return {"zahlungen": zahlungen, "zahlungen_12m": z12, "jahresend": jahresend,
+            "kurs": float(f"{kurse.iloc[-1]:.5g}")}
 
 
 def warnhinweis(k: dict) -> str:
@@ -424,17 +473,28 @@ def analysiere(yf, t, min_punkte):
     punkte = bewerte(k)
     name = sektor = waehrung = None
     geprueft = False
-    # Der langsame .info-Abruf lohnt nur, wenn die Mindestpunktzahl noch erreichbar ist (+3 max.)
-    if punkte["punkte_gesamt"] + 3 >= min_punkte:
+    # Der langsame .info-Abruf lohnt nur, wenn die Mindestpunktzahl noch erreichbar ist (+12 max.)
+    if punkte["punkte_gesamt"] + 12 >= min_punkte:
         info = tk.info or {}
         if len(info) > 5:  # leere/gedrosselte Antworten nicht als "geprüft" speichern
             k["payout"] = info.get("payoutRatio")
+            k["roe"] = info.get("returnOnEquity")
+            k["schulden"] = info.get("debtToEquity")      # Yahoo liefert Prozent (45 = 45 %)
+            k["sektor"] = info.get("sector")
+            # Dividendendeckung: Dividenden (= Payout x Gewinn) / Free Cashflow. Beide Größen
+            # stehen in der Berichtswährung, so entstehen keine Währungsfehler.
+            fcf, gewinn, po = (info.get("freeCashflow"), info.get("netIncomeToCommon"),
+                               info.get("payoutRatio"))
+            if all(isinstance(x, (int, float)) for x in (fcf, gewinn, po)) \
+                    and fcf > 0 and gewinn > 0 and po > 0:
+                k["fcf_payout"] = float(po * gewinn / fcf)
             name = info.get("longName") or info.get("shortName")
             sektor, waehrung = info.get("sector"), info.get("currency")
             punkte = bewerte(k)
             geprueft = True
     return {"ticker": t, "name": name, "sektor": sektor, "waehrung": waehrung,
-            **k, **punkte, "warnung": warnhinweis(k), "payout_geprueft": geprueft}
+            **k, **punkte, "warnung": warnhinweis(k), "payout_geprueft": geprueft,
+            **rohdaten(div, kurse)}
 
 
 def _lade_cache(pfad):
@@ -450,7 +510,7 @@ def _lade_cache(pfad):
 
 def _speichere_cache(cache, pfad):
     with open(pfad, "w", encoding="utf-8") as f:
-        json.dump(cache, f, default=float)
+        json.dump(cache, f, default=float, separators=(",", ":"))
 
 
 def screene(tickers, min_punkte=0, workers=4, cache_tage=7, cache_datei=None):
@@ -466,7 +526,7 @@ def screene(tickers, min_punkte=0, workers=4, cache_tage=7, cache_datei=None):
             row = c["row"]
             if row is None:
                 continue  # zahlt keine Dividende
-            if row["payout_geprueft"] or row["punkte_gesamt"] + 3 < min_punkte:
+            if row["payout_geprueft"] or row["punkte_gesamt"] + 12 < min_punkte:
                 zeilen.append(row)
                 continue
         offen.append(t)
@@ -555,20 +615,22 @@ def main():
     roh = roh.astype(object).where(roh.notna(), None)
     with open("docs/data.json", "w", encoding="utf-8") as f:
         json.dump({"updated": date.today().isoformat(),
-                   "rows": roh.to_dict("records")}, f, ensure_ascii=False, default=float)
+                   "rows": roh.to_dict("records")}, f, ensure_ascii=False, default=float, separators=(",", ":"))
 
     ergebnis = alle[alle.punkte_gesamt >= args.min_punkte].reset_index(drop=True)
     if ergebnis.empty:
         print("Keine Aktie erreicht die Mindestpunktzahl.")
         return
-    ergebnis.to_csv("screener_ergebnis.csv", index=False)
+    roh_spalten = ["zahlungen", "zahlungen_12m", "jahresend"]
+    ergebnis.drop(columns=[c for c in roh_spalten if c in ergebnis.columns]) \
+        .to_csv("screener_ergebnis.csv", index=False)
 
     spalten = [c for c in ["ticker", "name", "sektor", "punkte_gesamt", "rendite_aktuell",
                            "rendite_10j", "payout", "jahre_ohne_kuerzung", "anhebungen",
-                           "wachstum_5j", "warnung"] if c in ergebnis.columns]
+                           "wachstum_5j", "roe", "schulden", "fcf_payout", "warnung"] if c in ergebnis.columns]
     pd.set_option("display.width", 250)
     pd.set_option("display.max_columns", None)
-    print(f"\nTop {args.top} von {len(ergebnis)} Treffern (max. 18 Punkte), "
+    print(f"\nTop {args.top} von {len(ergebnis)} Treffern (max. 27 Punkte), "
           f"vollständige Liste: screener_ergebnis.csv\n")
     print(ergebnis[spalten].head(args.top).round(3).to_string())
 
