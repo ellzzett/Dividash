@@ -224,7 +224,7 @@ def lade_universum(name):
     for t in ticker_aus_tabellen(pd.read_html(io.StringIO(html))):
         if punkt_zu_strich:
             t = t.replace(".", "-")
-        if suffix and not t.endswith(suffix):
+        if suffix and "." not in t:
             t += suffix
         out.append(t)
     return out
@@ -270,17 +270,33 @@ BOERSEN = {
     "borsa italiana": ".MI", "madrid": ".MC", "six swiss": ".SW", "oslo": ".OL",
     "wiener": ".VI", "warsaw": ".WA", "prague": ".PR", "budapest": ".BD", "athens": ".AT",
     "istanbul": ".IS",
-    "australian": ".AX", "hong kong": ".HK", "gretai": ".TWO", "taiwan": ".TW",
+    "australian": ".AX", "asx": ".AX", "helsinki": ".HE", "hong kong": ".HK", "gretai": ".TWO", "taiwan": ".TW",
     "kosdaq": ".KQ", "korea": ".KS", "singapore": ".SI",
     "national stock exchange of india": ".NS", "shanghai": ".SS", "shenzhen": ".SZ",
     "new zealand": ".NZ", "thailand": ".BK", "bursa malaysia": ".KL", "indonesia": ".JK",
     "philippine": ".PS",
     "johannesburg": ".JO", "egypt": ".CA",
-    "b3": ".SA", "bolsa mexicana": ".MX", "santiago": ".SN", "colombia": ".CL",
+    "b3": ".SA", "brasil": ".SA", "bovespa": ".SA", "bolsa mexicana": ".MX", "santiago": ".SN", "colombia": ".CL",
     "buenos aires": ".BA",
     "tel aviv": ".TA", "saudi": ".SR", "qatar": ".QA", "kuwait": ".KW",
 }
 NORDIC = {"sweden": ".ST", "denmark": ".CO", "finland": ".HE"}
+
+
+# Börsen, die in ihrem Namen "nyse"/"nasdaq" enthalten können, aber keine US-Börsen sind
+# (z. B. "NYSE Euronext - Euronext Paris", "Nasdaq OMX Helsinki"). Deshalb werden diese
+# US-Schlüssel erst NACH allen anderen Börsen geprüft.
+US_BOERSEN = ("nasdaq", "new york stock exchange", "nyse", "cboe")
+
+# Fallback über das Land, wenn der Börsenname nicht erkannt wird
+LAND_SUFFIX = {
+    "france": ".PA", "belgium": ".BR", "portugal": ".LS", "netherlands": ".AS",
+    "ireland": ".IR", "italy": ".MI", "spain": ".MC", "norway": ".OL", "austria": ".VI",
+    "finland": ".HE", "sweden": ".ST", "denmark": ".CO", "greece": ".AT", "poland": ".WA",
+    "switzerland": ".SW", "germany": ".DE", "united kingdom": ".L", "australia": ".AX",
+    "brazil": ".SA", "japan": ".T", "canada": ".TO", "new zealand": ".NZ", "israel": ".TA",
+    "singapore": ".SI", "hong kong": ".HK", "south africa": ".JO", "mexico": ".MX",
+}
 
 
 def yahoo_ticker(ticker, exchange, location):
@@ -288,14 +304,19 @@ def yahoo_ticker(ticker, exchange, location):
     if t in ("", "-", "NAN"):
         return None
     ex = str(exchange).lower()
+    land = str(location).lower()
     suffix = None
-    if "nordic" in ex:
-        suffix = NORDIC.get(str(location).lower())
-    else:
+    if "nordic" in ex or "omx" in ex:
+        suffix = NORDIC.get(land)
+    if suffix is None:
         for key, suf in BOERSEN.items():
-            if key in ex:
+            if key not in US_BOERSEN and key in ex:
                 suffix = suf
                 break
+    if suffix is None and any(k in ex for k in US_BOERSEN) and "euronext" not in ex:
+        suffix = ""
+    if suffix is None:
+        suffix = LAND_SUFFIX.get(land)
     if suffix is None:
         return None
     if suffix == "":
