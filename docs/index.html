@@ -1,1 +1,263 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dividenden-Screener</title>
+<style>
+:root{
+  --bg:#f2f4f5; --panel:#fff; --ink:#16212b; --mute:#5d6b78; --line:#dde2e6;
+  --acc:#1e6f5c; --acc-soft:#e2f0ec; --warn:#a8650b; --warn-soft:#fbefd9;
+  --font:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#10171d; --panel:#18222a; --ink:#e6ecf0; --mute:#92a1ad; --line:#2a3743;
+        --acc:#5cc2a8; --acc-soft:#183a33; --warn:#e3a54a; --warn-soft:#3a2d14;}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--font)}
+header{padding:22px 28px 6px;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px}
+h1{margin:0;font-size:24px;font-weight:650;letter-spacing:-.01em}
+#meta{color:var(--mute);font-size:14px}
+.wrap{display:grid;grid-template-columns:310px 1fr;gap:20px;padding:16px 28px 40px;align-items:start}
+@media (max-width:900px){.wrap{grid-template-columns:1fr;padding:12px 14px 30px} header{padding:18px 14px 4px}}
+aside,.main{background:var(--panel);border:1px solid var(--line);border-radius:6px}
+aside{padding:16px 16px 12px;position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto}
+@media (max-width:900px){aside{position:static;max-height:none}}
+aside h2{font-size:16px;margin:0 0 4px}
+aside p.hint{margin:0 0 12px;color:var(--mute);font-size:13px}
+fieldset{border:0;border-top:1px solid var(--line);margin:0;padding:10px 0 12px}
+legend{padding:0;font-weight:600;font-size:14px;float:left;width:100%}
+.sub{clear:both;color:var(--mute);font-size:12.5px;margin:2px 0 6px}
+.row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.row.two{grid-template-columns:42px 1fr 1fr;align-items:center}
+.row.two span{color:var(--mute);font-size:13px}
+label.f{display:block;font-size:12.5px;color:var(--mute)}
+input[type=number],input[type=search],select{
+  width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--bg);
+  color:var(--ink);font:inherit;font-variant-numeric:tabular-nums}
+input:focus-visible,select:focus-visible,button:focus-visible,th button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+button.reset{margin-top:6px;padding:7px 12px;border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:4px;font:inherit;cursor:pointer}
+button.reset:hover{background:var(--bg)}
+.tools{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:end;padding:14px 16px;border-bottom:1px solid var(--line)}
+.tools>div{min-width:150px}
+.tools .chk{display:flex;gap:6px;align-items:center;padding-bottom:7px;font-size:14px}
+#count{margin-left:auto;color:var(--mute);font-size:14px;padding-bottom:7px}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:860px}
+th,td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{font-weight:600;font-size:13px;color:var(--mute);background:var(--panel);position:sticky;top:0}
+th button{all:unset;cursor:pointer;display:inline-block}
+th button:hover{color:var(--ink)}
+th[aria-sort] button{color:var(--ink)}
+th[aria-sort=ascending] button::after{content:" ↑"} th[aria-sort=descending] button::after{content:" ↓"}
+td{font-variant-numeric:tabular-nums}
+td.name{white-space:normal;min-width:200px}
+td.name b{font-weight:600} td.name small{display:block;color:var(--mute);font-size:12.5px}
+.pips{display:flex;gap:3px;justify-content:flex-end;margin-top:3px}
+.pips b{width:9px;height:4px;border-radius:2px;background:var(--line)}
+.pips b.on{background:var(--acc)}
+.score{font-size:20px;font-weight:650}
+.score small{font-size:12px;font-weight:400;color:var(--mute)}
+.bar{height:4px;background:var(--line);border-radius:2px;margin-top:4px;min-width:70px}
+.bar i{display:block;height:100%;background:var(--acc);border-radius:2px}
+.chip{display:inline-block;font-size:12px;padding:1px 7px;border-radius:10px;background:var(--warn-soft);color:var(--warn);cursor:help}
+.empty{padding:40px 24px;text-align:center;color:var(--mute)}
+.empty h3{color:var(--ink);margin:0 0 6px}
+.more{display:block;margin:14px auto;padding:8px 18px}
+@media (prefers-reduced-motion:no-preference){.bar i{transition:width .2s}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Dividenden-Screener</h1>
+  <span id="meta">Lade Daten …</span>
+</header>
+<div class="wrap">
+  <aside aria-label="Bewertungsregeln">
+    <h2>Bewertungsregeln</h2>
+    <p class="hint">Jede Änderung berechnet die Punkte sofort neu. Deine Werte bleiben in diesem Browser gespeichert.</p>
+    <div id="settings"></div>
+    <button class="reset" id="reset" type="button">Auf Standard zurücksetzen</button>
+  </aside>
+  <section class="main" aria-live="polite">
+    <div class="tools">
+      <div><label class="f" for="q">Suche</label><input id="q" type="search" placeholder="Ticker oder Name"></div>
+      <div><label class="f" for="sec">Sektor</label><select id="sec"><option value="">Alle</option></select></div>
+      <div><label class="f" for="min">Mindestpunkte (von 18)</label><input id="min" type="number" min="0" max="18" step="1"></div>
+      <label class="chk"><input id="nowarn" type="checkbox"> Warnungen ausblenden</label>
+      <span id="count"></span>
+    </div>
+    <div class="scroll"><table id="tbl"></table></div>
+    <div id="empty" class="empty" hidden></div>
+    <button class="reset more" id="more" type="button" hidden>Mehr anzeigen</button>
+  </section>
+</div>
 
+<script>
+// ---------------------------------------------------------------- Regeln
+// Schwellen je Stufe (3 / 2 / 1 Punkte). Prozentwerte in %, Zähler in Jahren bzw. Anzahl.
+const DEF = {
+  r10:[3,2,1], ra:[5,3.5,2], w5:[10,5,0], kk:[10,8,5], ah:[20,10,3],
+  pay:[[25,75],[20,80],[15,85]], min:12
+};
+const GROUPS = [
+  {id:'r10', t:'Ø Rendite, 10 Jahre', sub:'Rendite größer als … %', u:'%'},
+  {id:'pay', t:'Payout-Ratio', sub:'Quote liegt zwischen … und … %'},
+  {id:'kk',  t:'Jahre ohne Kürzung', sub:'mindestens … Jahre'},
+  {id:'ah',  t:'Anhebungen in Folge', sub:'mindestens … Anhebungen'},
+  {id:'ra',  t:'Aktuelle Rendite', sub:'Rendite größer als … %', u:'%'},
+  {id:'w5',  t:'Dividendenwachstum, 5 Jahre p. a.', sub:'Wachstum größer als … %', u:'%'},
+];
+const COLS = [ // Reihenfolge = Tabellenspalten
+  {k:'ra',  t:'Rendite aktuell', f:r=>r.rendite_aktuell, pct:1},
+  {k:'r10', t:'Ø Rendite 10 J.', f:r=>r.rendite_10j, pct:1},
+  {k:'pay', t:'Payout', f:r=>r.payout, pct:1},
+  {k:'kk',  t:'Ohne Kürzung', f:r=>r.jahre_ohne_kuerzung, unit:' J.'},
+  {k:'ah',  t:'Anhebungen', f:r=>r.anhebungen},
+  {k:'w5',  t:'Wachstum 5 J.', f:r=>r.wachstum_5j, pct:1},
+];
+const ORDER = ['r10','pay','kk','ah','ra','w5'];  // wie im Python-Skript
+
+let cfg = structuredClone(DEF), rows = [], sort = {k:'total', dir:-1}, shown = 100, sektor = '', suche = '', nowarn = false;
+try { const s = JSON.parse(localStorage.getItem('div-cfg')||'null'); if (s) cfg = {...cfg, ...s}; } catch(e){}
+const save = () => { try { localStorage.setItem('div-cfg', JSON.stringify(cfg)); } catch(e){} };
+
+// ------------------------------------------------------------- Bewertung
+const ok = v => v!=null && !isNaN(v);
+function stufen(v, t, incl, div){
+  if(!ok(v)) return 0;
+  for(let i=0;i<3;i++){ const s=t[i]/div; if(ok(s) && (incl ? v>=s : v>s)) return 3-i; }
+  return 0;
+}
+function payoutPunkte(p){
+  if(!ok(p)) return 0;
+  for(let i=0;i<3;i++){ const [lo,hi]=cfg.pay[i]; if(ok(lo)&&ok(hi)&&p>=lo/100&&p<=hi/100) return 3-i; }
+  return 0;
+}
+function bewerte(r){
+  const p = {
+    r10:stufen(r.rendite_10j,cfg.r10,false,100), pay:payoutPunkte(r.payout),
+    kk:stufen(r.jahre_ohne_kuerzung,cfg.kk,true,1), ah:stufen(r.anhebungen,cfg.ah,true,1),
+    ra:stufen(r.rendite_aktuell,cfg.ra,false,100), w5:stufen(r.wachstum_5j,cfg.w5,false,100)
+  };
+  r._p = p; r._total = ORDER.reduce((a,k)=>a+p[k],0);
+}
+
+// ---------------------------------------------------------- Einstellungen
+function buildSettings(){
+  const el = document.getElementById('settings');
+  el.innerHTML = GROUPS.map(g=>{
+    let inner;
+    if(g.id==='pay'){
+      inner = [3,2,1].map((pt,i)=>`<div class="row two"><span>${pt} Pkt</span>
+        <input type="number" aria-label="Payout ${pt} Punkte von" data-g="pay" data-i="${i}" data-j="0" step="1">
+        <input type="number" aria-label="Payout ${pt} Punkte bis" data-g="pay" data-i="${i}" data-j="1" step="1"></div>`).join('');
+    } else {
+      inner = `<div class="row">`+[3,2,1].map((pt,i)=>`<label class="f">${pt} Punkte
+        <input type="number" data-g="${g.id}" data-i="${i}" step="any"></label>`).join('')+`</div>`;
+    }
+    return `<fieldset><legend>${g.t}</legend><div class="sub">${g.sub}</div>${inner}</fieldset>`;
+  }).join('');
+  fillInputs();
+}
+function fillInputs(){
+  document.querySelectorAll('#settings input').forEach(inp=>{
+    const {g,i,j} = inp.dataset;
+    inp.value = g==='pay' ? cfg.pay[i][j] : cfg[g][i];
+  });
+  document.getElementById('min').value = cfg.min;
+}
+document.getElementById('settings').addEventListener('input', e=>{
+  const {g,i,j} = e.target.dataset; if(!g) return;
+  const v = e.target.value===''? NaN : parseFloat(e.target.value);
+  if(g==='pay') cfg.pay[i][j] = v; else cfg[g][i] = v;
+  save(); render(true);
+});
+document.getElementById('min').addEventListener('input', e=>{ cfg.min = parseInt(e.target.value)||0; save(); render(); });
+document.getElementById('reset').addEventListener('click', ()=>{ cfg = structuredClone(DEF); save(); fillInputs(); render(true); });
+document.getElementById('q').addEventListener('input', e=>{ suche = e.target.value.toLowerCase(); render(); });
+document.getElementById('sec').addEventListener('change', e=>{ sektor = e.target.value; render(); });
+document.getElementById('nowarn').addEventListener('change', e=>{ nowarn = e.target.checked; render(); });
+document.getElementById('more').addEventListener('click', ()=>{ shown += 100; render(); });
+
+// -------------------------------------------------------------- Ausgabe
+const nf = (v,d=1)=>v.toLocaleString('de-DE',{minimumFractionDigits:d,maximumFractionDigits:d});
+const esc = s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pips = p=>`<span class="pips" title="${p} von 3 Punkten">${[1,2,3].map(n=>`<b class="${n<=p?'on':''}"></b>`).join('')}</span>`;
+
+function sortVal(r,k){
+  if(k==='total') return r._total;
+  if(k==='name') return (r.name||r.ticker).toLowerCase();
+  const c = COLS.find(c=>c.k===k); return c ? c.f(r) : null;
+}
+function render(rescore){
+  if(rescore) rows.forEach(bewerte);
+  const list = rows.filter(r=> r._total>=cfg.min
+    && (!sektor || r.sektor===sektor)
+    && (!suche || (r.ticker+' '+(r.name||'')).toLowerCase().includes(suche))
+    && !(nowarn && r.warnung));
+  list.sort((a,b)=>{
+    const x=sortVal(a,sort.k), y=sortVal(b,sort.k);
+    if(!ok(x)&&typeof x!=='string') return 1; if(!ok(y)&&typeof y!=='string') return -1;
+    const d = x<y?-1:x>y?1:0;
+    return d ? d*sort.dir : (b.rendite_aktuell||0)-(a.rendite_aktuell||0);
+  });
+  document.getElementById('count').textContent = `${list.length.toLocaleString('de-DE')} von ${rows.length.toLocaleString('de-DE')} Aktien`;
+  const head = [['name','Aktie'],['total','Punkte'],...COLS.map(c=>[c.k,c.t])];
+  const th = head.map(([k,t])=>`<th scope="col" ${sort.k===k?`aria-sort="${sort.dir>0?'ascending':'descending'}"`:''}><button type="button" data-k="${k}">${t}</button></th>`).join('')+'<th scope="col">Hinweis</th>';
+  const body = list.slice(0,shown).map(r=>{
+    const cells = COLS.map(c=>{
+      const v = c.f(r);
+      const txt = !ok(v) ? '–' : c.pct ? nf(v*100)+' %' : nf(v,0)+(c.unit||'');
+      return `<td>${txt}${pips(r._p[c.k])}</td>`;
+    }).join('');
+    return `<tr><td class="name"><b>${esc(r.name||r.ticker)}</b><small>${esc(r.ticker)}${r.sektor?' · '+esc(r.sektor):''}</small></td>
+      <td><div class="score">${r._total}<small> / 18</small></div><div class="bar"><i style="width:${r._total/18*100}%"></i></div></td>
+      ${cells}<td>${r.warnung?`<span class="chip" title="${esc(r.warnung)}">prüfen</span>`:''}</td></tr>`;
+  }).join('');
+  document.getElementById('tbl').innerHTML = `<thead><tr>${th}</tr></thead><tbody>${body}</tbody>`;
+  document.getElementById('more').hidden = list.length<=shown;
+  const em = document.getElementById('empty');
+  if(rows.length && !list.length){ em.hidden=false; em.innerHTML='<h3>Keine Aktie erfüllt diese Regeln</h3>Senke die Mindestpunktzahl oder lockere eine Schwelle.'; }
+  else if(rows.length) em.hidden = true;
+}
+document.getElementById('tbl').addEventListener('click', e=>{
+  const b = e.target.closest('button[data-k]'); if(!b) return;
+  const k = b.dataset.k;
+  sort = {k, dir: sort.k===k ? -sort.dir : (k==='name'?1:-1)}; render();
+});
+
+// ---------------------------------------------------------------- Daten
+function setData(d){
+  rows = d.rows||[]; rows.forEach(bewerte);
+  const secs = [...new Set(rows.map(r=>r.sektor).filter(Boolean))].sort();
+  const sel = document.getElementById('sec');
+  sel.innerHTML = '<option value="">Alle</option>'+secs.map(s=>`<option>${esc(s)}</option>`).join('');
+  sel.value = secs.includes(sektor) ? sektor : (sektor='');
+  const dt = d.updated ? new Date(d.updated).toLocaleDateString('de-DE',{day:'numeric',month:'long',year:'numeric'}) : 'unbekannt';
+  document.getElementById('meta').textContent = `Daten vom ${dt} · ${rows.length.toLocaleString('de-DE')} Aktien mit Dividende`;
+  render();
+}
+async function laden(){
+  try{
+    const r = await fetch('data.json?t='+Date.now(), {cache:'no-store'});
+    if(!r.ok) throw new Error(r.status);
+    setData(await r.json());
+  }catch(e){
+    if(rows.length) return;  // alte Daten behalten
+    document.getElementById('meta').textContent = 'Keine Daten geladen';
+    document.getElementById('tbl').innerHTML = '';
+    const em = document.getElementById('empty'); em.hidden = false;
+    em.innerHTML = `<h3>data.json nicht gefunden</h3>Lege die Datei neben diese Seite (der Screener erzeugt sie) oder wähle sie hier aus:<br><br><input type="file" id="file" accept=".json">`;
+    document.getElementById('file').addEventListener('change', async ev=>{
+      const f = ev.target.files[0]; if(f) setData(JSON.parse(await f.text()));
+    });
+  }
+}
+buildSettings(); laden();
+setInterval(laden, 30*60*1000);  // offene Seite holt alle 30 Minuten neue Daten
+</script>
+</body>
+</html>
