@@ -29,6 +29,6 @@ jobs:
         run: |
           git config user.name "screener-bot"
           git config user.email "bot@users.noreply.github.com"
-          git add docs/data.json screener_cache.json
+          git add -A
           git commit -m "Daten aktualisiert" || echo "Keine Änderungen"
           git push
