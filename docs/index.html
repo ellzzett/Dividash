@@ -19,6 +19,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--font)}
 header{padding:22px 28px 6px;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px}
 h1{margin:0;font-size:24px;font-weight:650;letter-spacing:-.01em}
 #meta{color:var(--mute);font-size:14px}
+.ver{margin-left:auto;color:var(--mute);font-size:12.5px;font-variant-numeric:tabular-nums}
 .wrap{display:grid;grid-template-columns:310px 1fr;gap:20px;padding:16px 28px 40px;align-items:start}
 @media (max-width:900px){.wrap{grid-template-columns:1fr;padding:12px 14px 30px} header{padding:18px 14px 4px}}
 aside,.main{background:var(--panel);border:1px solid var(--line);border-radius:6px}
@@ -79,6 +80,7 @@ td.name b{font-weight:600} td.name small{display:block;color:var(--mute);font-si
 <header>
   <h1>Dividenden-Screener</h1>
   <span id="meta">Lade Daten …</span>
+  <span id="ver" class="ver"></span>
 </header>
 <div class="wrap">
   <aside aria-label="Bewertungsregeln">
@@ -134,6 +136,7 @@ const COLS = [ // Reihenfolge = Tabellenspalten
   {k:'sch', t:'Schulden/EK', f:r=>r.schulden, unit:' %'},
   {k:'fcf', t:'Deckung FCF', f:r=>r.fcf_payout, pct:1},
 ];
+const VERSION = '1.4.0';   // Dashboard-Version
 const ORDER = COLS.map(c=>c.k);
 const FINANZ = 'Financial Services';
 
@@ -375,6 +378,7 @@ function setData(d){
   sel.innerHTML = '<option value="">Alle</option>'+secs.map(s=>`<option>${esc(s)}</option>`).join('');
   sel.value = secs.includes(sektor) ? sektor : (sektor='');
   const dt = d.updated ? new Date(d.updated).toLocaleDateString('de-DE',{day:'numeric',month:'long',year:'numeric'}) : 'unbekannt';
+  document.getElementById('ver').textContent = `Dashboard v${VERSION} · Skript ${d.version ? 'v'+d.version : 'älter als v1.4.0'}`;
   document.getElementById('meta').textContent = `Daten vom ${dt} · ${rows.length.toLocaleString('de-DE')} Aktien mit Dividende`;
   render();
 }
@@ -394,6 +398,7 @@ async function laden(){
     });
   }
 }
+document.getElementById('ver').textContent = `Dashboard v${VERSION}`;
 buildSettings(); laden();
 setInterval(laden, 30*60*1000);  // offene Seite holt alle 30 Minuten neue Daten
 </script>
