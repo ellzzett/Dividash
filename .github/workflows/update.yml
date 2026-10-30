@@ -23,6 +23,8 @@ jobs:
       # Bei Zeitüberschreitung bleibt der Fortschritt im Cache erhalten,
       # der nächste Lauf macht dort weiter.
       - name: Screener ausführen
+        env:
+          PYTHONWARNINGS: ignore
         run: timeout 340m python dividenden_screener.py --min-punkte 9 --cache-tage 6 --cache screener_cache.json || true
 
       - name: Ergebnis committen
