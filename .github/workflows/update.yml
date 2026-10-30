@@ -1,0 +1,34 @@
+# Ablegen unter: .github/workflows/update.yml
+name: Daten aktualisieren
+
+on:
+  schedule:
+    - cron: "0 3 * * 0"      # jeden Sonntag, 03:00 UTC
+  workflow_dispatch:          # zusätzlich per Knopfdruck im Actions-Tab
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install yfinance pandas lxml requests
+
+      # Bei Zeitüberschreitung bleibt der Fortschritt im Cache erhalten,
+      # der nächste Lauf macht dort weiter.
+      - name: Screener ausführen
+        run: timeout 340m python dividenden_screener.py --min-punkte 9 --cache-tage 6 --cache screener_cache.json || true
+
+      - name: Ergebnis committen
+        run: |
+          git config user.name "screener-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add docs/data.json screener_cache.json
+          git commit -m "Daten aktualisiert" || echo "Keine Änderungen"
+          git push
